@@ -557,12 +557,12 @@ Payment::consumeMaxPayments()
             if (amount.asset() != maxAmount.asset())
                 continue;
 
-            auto const remaining = bound[sfMaxPayments];
-
-            if (remaining == 0)
+            auto const remaining = bound[~sfMaxPayments];
+            if (!remaining)
+                return tesSUCCESS;
+            if (*remaining == 0)
                 return tefINTERNAL;
-
-            bound.setFieldU32(sfMaxPayments, remaining - 1);
+            bound.setFieldU32(sfMaxPayments, *remaining - 1);
 
             permission.setFieldArray(sfBounds, bounds);
             sle->setFieldArray(sfPermissions, permissions);
@@ -1011,7 +1011,7 @@ Payment::checkBounds(
         if (spendingAmount > maxAmount)
             return terNO_DELEGATE_PERMISSION;
 
-        if (bound[sfMaxPayments] == 0)
+        if (auto const maxPayments = bound[~sfMaxPayments]; maxPayments && *maxPayments == 0)
             return terNO_DELEGATE_PERMISSION;
 
         return tesSUCCESS;

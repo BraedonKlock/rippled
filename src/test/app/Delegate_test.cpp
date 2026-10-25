@@ -47,6 +47,7 @@
 #include <xrpl/protocol/Permissions.h>
 #include <xrpl/protocol/SField.h>
 #include <xrpl/protocol/STObject.h>
+#include <xrpl/protocol/STParsedJSON.h>
 #include <xrpl/protocol/STTx.h>
 #include <xrpl/protocol/SecretKey.h>
 #include <xrpl/protocol/TER.h>
@@ -3210,6 +3211,60 @@ class Delegate_test : public beast::unit_test::Suite
     }
 
     void
+    testBoundOptionalFields(FeatureBitset features)
+    {
+        testcase("Bound optional fields");
+        using namespace jtx;
+
+        Env env(*this, features);
+        Account const alice{"alice"};
+        Account const bob{"bob"};
+        Account const gw{"gateway"};
+        auto const usd = gw["USD"];
+
+        env.fund(XRP(10000), alice, bob, gw);
+        env.trust(usd(1000), alice, bob);
+        env.close();
+        env(pay(gw, alice, usd(500)));
+        env.close();
+
+        auto boundedSet = [&](json::Value const& bound) {
+            auto jv = delegate::set(alice, bob, {"Payment"});
+            json::Value boundObj;
+            boundObj[sfBound.jsonName] = bound;
+            json::Value bounds(json::ValueType::Array);
+            bounds.append(boundObj);
+            jv[sfPermissions.jsonName][0u][sfPermission.jsonName][sfBounds.jsonName] = bounds;
+            return jv;
+        };
+
+        {
+            json::Value bound;
+            bound[sfMaxAmount.jsonName] = usd(10).value().getJson(JsonOptions::Values::None);
+            env(boundedSet(bound));
+            env.close();
+
+            for (int i = 0; i < 12; ++i)
+            {
+                env(pay(alice, bob, usd(10)), delegate::As(bob));
+                env.close();
+            }
+            env.require(Balance(alice, usd(380)));
+
+            env(pay(alice, bob, usd(11)), delegate::As(bob), Ter(terNO_DELEGATE_PERMISSION));
+            env.close();
+            env.require(Balance(alice, usd(380)));
+        }
+
+        {
+            json::Value bound;
+            bound[sfMaxPayments.jsonName] = 3;
+            STParsedJSONObject const parsed("test", boundedSet(bound));
+            BEAST_EXPECT(!parsed.object);
+        }
+    }
+
+    void
     run() override
     {
         FeatureBitset const all = jtx::testableAmendments();
@@ -3243,6 +3298,7 @@ class Delegate_test : public beast::unit_test::Suite
         testDelegateUtilsNullptrCheck();
         testPermissionToTxType();
         testBoundedPaymentGranular(all);
+        testBoundOptionalFields(all);
     }
 };
 BEAST_DEFINE_TESTSUITE(Delegate, app, xrpl);

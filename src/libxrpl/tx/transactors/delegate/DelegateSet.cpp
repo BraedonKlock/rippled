@@ -62,10 +62,8 @@ DelegateSet::preflight(PreflightContext const& ctx)
             if (bound.getFName() != sfBound)
                 return temMALFORMED;
 
-            if (bound.isFieldPresent(sfMaxAmount) && bound[sfMaxAmount] <= beast::kZero)
-            {
+            if (!bound.isFieldPresent(sfMaxAmount) || bound[sfMaxAmount] <= beast::kZero)
                 return temMALFORMED;
-            }
 
             if (bound.isFieldPresent(sfMaxPayments) && bound[sfMaxPayments] == 0)
             {

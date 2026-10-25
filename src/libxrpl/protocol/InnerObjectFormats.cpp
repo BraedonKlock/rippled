@@ -99,7 +99,7 @@ InnerObjectFormats::InnerObjectFormats()
     add(sfBound.jsonName,
         sfBound.getCode(),
         {
-            {sfMaxAmount, SoeOptional},
+            {sfMaxAmount, SoeRequired},
             {sfMaxPayments, SoeOptional}
         }
     );
