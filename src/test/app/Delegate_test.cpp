@@ -3150,6 +3150,66 @@ class Delegate_test : public beast::unit_test::Suite
     }
 
     void
+    testBoundedPaymentGranular(FeatureBitset features)
+    {
+        testcase("Bounded Payment with granular permissions");
+        using namespace jtx;
+
+        {
+            Env env(*this, features);
+            Account const alice{"alice"};
+            Account const bob{"bob"};
+            Account const gw{"gateway"};
+            auto const usd = gw["USD"];
+
+            env.fund(XRP(10000), alice, bob, gw);
+            env.trust(usd(1000), alice);
+            env.close();
+            env(pay(gw, alice, usd(100)));
+            env.close();
+
+            auto jv = delegate::set(alice, bob, {"Payment", "PaymentBurn"});
+            json::Value bound;
+            bound[sfMaxAmount.jsonName] = usd(10).value().getJson(JsonOptions::Values::None);
+            bound[sfMaxPayments.jsonName] = 5;
+            json::Value boundObj;
+            boundObj[sfBound.jsonName] = bound;
+            json::Value bounds(json::ValueType::Array);
+            bounds.append(boundObj);
+            jv[sfPermissions.jsonName][0u][sfPermission.jsonName][sfBounds.jsonName] = bounds;
+            env(jv);
+            env.close();
+
+            env(pay(alice, gw, usd(50)), delegate::As(bob), Ter(terNO_DELEGATE_PERMISSION));
+            env.close();
+            env.require(Balance(alice, usd(100)));
+
+            env(pay(alice, gw, usd(10)), delegate::As(bob));
+            env.close();
+            env.require(Balance(alice, usd(90)));
+        }
+
+        {
+            Env env(*this, features);
+            Account const alice{"alice"};
+            Account const bob{"bob"};
+            Account const gw{"gateway"};
+            auto const usd = gw["USD"];
+
+            env.fund(XRP(10000), alice, bob, gw);
+            env.trust(usd(1000), alice);
+            env.close();
+
+            env(delegate::set(gw, bob, {"PaymentMint"}));
+            env.close();
+
+            env(pay(gw, alice, usd(50)), delegate::As(bob));
+            env.close();
+            env.require(Balance(alice, usd(50)));
+        }
+    }
+
+    void
     run() override
     {
         FeatureBitset const all = jtx::testableAmendments();
@@ -3182,6 +3242,7 @@ class Delegate_test : public beast::unit_test::Suite
         testNonDelegableTxWithDelegate(all);
         testDelegateUtilsNullptrCheck();
         testPermissionToTxType();
+        testBoundedPaymentGranular(all);
     }
 };
 BEAST_DEFINE_TESTSUITE(Delegate, app, xrpl);

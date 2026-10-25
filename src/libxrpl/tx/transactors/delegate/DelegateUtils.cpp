@@ -47,6 +47,18 @@ checkTxPermission(SLE::ConstRef delegate, STTx const& tx, Rules const& rules)
     return terNO_DELEGATE_PERMISSION;
 }
 
+bool
+hasBoundedTxPermission(SLE::ConstRef delegate, STTx const& tx, Rules const& rules)
+{
+    if (!delegate || !rules.enabled(featureBoundedDelegation))
+        return false;
+    auto const txPermission = tx.getTxnType() + 1;
+    for (auto const& permission : delegate->getFieldArray(sfPermissions))
+        if (permission[sfPermissionValue] == txPermission)
+            return permission.isFieldPresent(sfBounds);
+    return false;
+}
+
 std::unordered_set<GranularPermissionType>
 getGranularPermission(SLE::ConstRef delegate, TxType const& txType)
 {

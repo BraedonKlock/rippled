@@ -575,7 +575,7 @@ Payment::consumeMaxPayments()
         return tefINTERNAL;
     }
 
-    return tefINTERNAL;
+    return tesSUCCESS;
 }
 
 TER

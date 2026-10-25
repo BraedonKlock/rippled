@@ -20,6 +20,9 @@ namespace xrpl {
 NotTEC
 checkTxPermission(SLE::ConstRef delegate, STTx const& tx, Rules const& rules);
 
+bool
+hasBoundedTxPermission(SLE::ConstRef delegate, STTx const& tx, Rules const& rules);
+
 /**
  * Load the granular permissions granted to the delegate account for the
  * specified transaction type
