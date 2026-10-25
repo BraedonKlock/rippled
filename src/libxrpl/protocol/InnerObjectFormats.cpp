@@ -91,7 +91,6 @@ InnerObjectFormats::InnerObjectFormats()
         sfPermission.getCode(), 
         {
             {sfPermissionValue, SoeRequired},
-            {sfMaxPayments, SoeOptional},
             {sfBounds, SoeOptional}
         });    
 
