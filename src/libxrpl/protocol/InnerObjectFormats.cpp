@@ -100,7 +100,8 @@ InnerObjectFormats::InnerObjectFormats()
         sfBound.getCode(),
         {
             {sfMaxAmount, SoeRequired},
-            {sfMaxPayments, SoeOptional}
+            {sfMaxPayments, SoeOptional},
+	    {sfMaxBudget, SoeOptional}
         }
     );
 

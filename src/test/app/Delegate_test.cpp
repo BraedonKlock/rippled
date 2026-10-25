@@ -29,7 +29,6 @@
 #include <test/jtx/txflags.h>
 #include <test/jtx/vault.h>
 
-
 #include <xrpl/basics/Number.h>
 #include <xrpl/basics/Slice.h>
 #include <xrpl/basics/base_uint.h>
@@ -61,6 +60,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <unordered_map>
@@ -3107,12 +3107,12 @@ class Delegate_test : public beast::unit_test::Suite
         testcase("DelegateUtils nullptr check");
 
         // checkTxPermission nullptr check
-        
+
         jtx::Env env{*this};
         STTx const tx{ttPAYMENT, [](STObject&) {}};
 
         BEAST_EXPECT(
-        checkTxPermission(nullptr, tx, env.current()->rules()) == terNO_DELEGATE_PERMISSION);
+            checkTxPermission(nullptr, tx, env.current()->rules()) == terNO_DELEGATE_PERMISSION);
         // getGranularPermission nullptr check
         auto const granularPermissions = getGranularPermission(nullptr, ttPAYMENT);
         BEAST_EXPECT(granularPermissions.empty());
@@ -3181,11 +3181,14 @@ class Delegate_test : public beast::unit_test::Suite
             env(jv);
             env.close();
 
-            env(pay(alice, gw, usd(50)), delegate::As(bob), Ter(terNO_DELEGATE_PERMISSION));
+            env(pay(alice, gw, usd(50)),
+                Sendmax(usd(50)),
+                delegate::As(bob),
+                Ter(terNO_DELEGATE_PERMISSION));
             env.close();
             env.require(Balance(alice, usd(100)));
 
-            env(pay(alice, gw, usd(10)), delegate::As(bob));
+            env(pay(alice, gw, usd(10)), Sendmax(usd(10)), delegate::As(bob));
             env.close();
             env.require(Balance(alice, usd(90)));
         }
@@ -3223,6 +3226,8 @@ class Delegate_test : public beast::unit_test::Suite
         auto const usd = gw["USD"];
 
         env.fund(XRP(10000), alice, bob, gw);
+        // Validate the issuer default-ripple setting before creating trust lines.
+        env.close();
         env.trust(usd(1000), alice, bob);
         env.close();
         env(pay(gw, alice, usd(500)));
@@ -3241,17 +3246,23 @@ class Delegate_test : public beast::unit_test::Suite
         {
             json::Value bound;
             bound[sfMaxAmount.jsonName] = usd(10).value().getJson(JsonOptions::Values::None);
+            // Amount alone is no longer sufficient.
+            env(boundedSet(bound), Ter(temMALFORMED));
+            bound[sfMaxPayments.jsonName] = 12;
             env(boundedSet(bound));
             env.close();
 
             for (int i = 0; i < 12; ++i)
             {
-                env(pay(alice, bob, usd(10)), delegate::As(bob));
+                env(pay(alice, bob, usd(10)), Sendmax(usd(10)), delegate::As(bob));
                 env.close();
             }
             env.require(Balance(alice, usd(380)));
 
-            env(pay(alice, bob, usd(11)), delegate::As(bob), Ter(terNO_DELEGATE_PERMISSION));
+            env(pay(alice, bob, usd(11)),
+                Sendmax(usd(11)),
+                delegate::As(bob),
+                Ter(terNO_DELEGATE_PERMISSION));
             env.close();
             env.require(Balance(alice, usd(380)));
         }
@@ -3261,6 +3272,262 @@ class Delegate_test : public beast::unit_test::Suite
             bound[sfMaxPayments.jsonName] = 3;
             STParsedJSONObject const parsed("test", boundedSet(bound));
             BEAST_EXPECT(!parsed.object);
+        }
+    }
+
+    // Reuse the signed-transaction Env and delegate ledger checks in this suite.
+    static json::Value
+    budgetSet(
+        jtx::Account const& owner,
+        jtx::Account const& delegateAccount,
+        STAmount const& maximum,
+        std::optional<std::uint32_t> count,
+        std::optional<STAmount> budget)
+    {
+        auto tx = jtx::delegate::set(owner, delegateAccount, {"Payment"});
+        json::Value bound;
+        bound[sfMaxAmount.jsonName] = maximum.getJson(JsonOptions::Values::None);
+        if (count)
+            bound[sfMaxPayments.jsonName] = *count;
+        if (budget)
+            bound[sfMaxBudget.jsonName] = budget->getJson(JsonOptions::Values::None);
+        json::Value wrapper;
+        wrapper[sfBound.jsonName] = bound;
+        tx[sfPermissions.jsonName][0u][sfPermission.jsonName][sfBounds.jsonName].append(wrapper);
+        return tx;
+    }
+
+    void
+    expectBudget(
+        jtx::Env& env,
+        jtx::Account const& owner,
+        jtx::Account const& delegateAccount,
+        STAmount const& maximum,
+        std::optional<std::uint32_t> count,
+        std::optional<STAmount> budget,
+        std::size_t index = 0)
+    {
+        auto const sle = env.current()->read(keylet::delegate(owner, delegateAccount));
+        if (!BEAST_EXPECT(sle != nullptr))
+            return;
+        auto const& bounds = sle->getFieldArray(sfPermissions)[0].getFieldArray(sfBounds);
+        if (!BEAST_EXPECT(index < bounds.size()))
+            return;
+        auto const& bound = bounds[index];
+        BEAST_EXPECT(bound[sfMaxAmount] == maximum);
+        BEAST_EXPECT(bound[~sfMaxPayments] == count);
+        BEAST_EXPECT(bound[~sfMaxBudget] == budget);
+    }
+
+    void
+    testPaymentBudgetValidation(FeatureBitset features)
+    {
+        testcase("Payment budget configuration validation");
+        using namespace jtx;
+        Account const alice{"alice"}, bob{"bob"}, gw{"gateway"}, other{"other"};
+        auto const usd = gw["USD"];
+        Env env(*this, features);
+        env.fund(XRP(10000), alice, bob, gw, other);
+
+        env(budgetSet(alice, bob, XRP(10), std::nullopt, std::nullopt), Ter(temMALFORMED));
+        env(budgetSet(alice, bob, XRP(0), 1, XRP(10)), Ter(temMALFORMED));
+        env(budgetSet(alice, bob, XRP(-1), 1, XRP(10)), Ter(temMALFORMED));
+        env(budgetSet(alice, bob, XRP(10), 0, XRP(10)), Ter(temMALFORMED));
+        env(budgetSet(alice, bob, XRP(10), std::nullopt, XRP(0)), Ter(temMALFORMED));
+        env(budgetSet(alice, bob, XRP(10), 1, XRP(-1)), Ter(temMALFORMED));
+        env(budgetSet(alice, bob, usd(10), 1, gw["EUR"](10)), Ter(temMALFORMED));
+        env(budgetSet(alice, bob, usd(10), 1, other["USD"](10)), Ter(temMALFORMED));
+
+        auto missingAmount = budgetSet(alice, bob, XRP(10), 1, XRP(10));
+        missingAmount[sfPermissions.jsonName][0u][sfPermission.jsonName][sfBounds.jsonName][0u]
+                     [sfBound.jsonName]
+                         .removeMember(sfMaxAmount.jsonName);
+        STParsedJSONObject const parsed("test", missingAmount);
+        BEAST_EXPECT(!parsed.object);
+
+        // Each supported combination is independently accepted and persisted.
+        env(budgetSet(alice, bob, XRP(10), 2, std::nullopt));
+        expectBudget(env, alice, bob, XRP(10), 2, std::nullopt);
+        env(budgetSet(alice, bob, XRP(10), std::nullopt, XRP(20)));
+        expectBudget(env, alice, bob, XRP(10), std::nullopt, XRP(20));
+        env(budgetSet(alice, bob, XRP(10), 2, XRP(20)));
+        expectBudget(env, alice, bob, XRP(10), 2, XRP(20));
+
+        Env disabled(*this, features - featureBoundedDelegation);
+        disabled.fund(XRP(10000), alice, bob);
+        disabled(budgetSet(alice, bob, XRP(10), 2, XRP(20)), Ter(temDISABLED));
+        disabled(delegate::set(alice, bob, {"Payment"}));
+        disabled(pay(alice, bob, XRP(1)), delegate::As(bob));
+    }
+
+    void
+    testPaymentBudgetXRP(FeatureBitset features)
+    {
+        using namespace jtx;
+        for (bool withCount : {false, true})
+        {
+            testcase(
+                withCount ? "XRP budget and payment count" : "XRP budget without payment count");
+            Env env(*this, features);
+            Account const alice{"alice"}, bob{"bob"}, carol{"carol"}, unfunded{"unfunded"};
+            env.fund(XRP(10000), alice, bob, carol);
+            auto count = [&](std::uint32_t n) -> std::optional<std::uint32_t> {
+                return withCount ? std::optional{n} : std::nullopt;
+            };
+            env(budgetSet(alice, bob, XRP(10), count(4), XRP(25)));
+            env(budgetSet(alice, carol, XRP(10), std::nullopt, XRP(7)));
+
+            // The Payment fails after permission checks; neither allowance changes.
+            env(pay(alice, unfunded, XRP(0.000001)), delegate::As(bob), Ter(tecNO_DST_INSUF_XRP));
+            expectBudget(env, alice, bob, XRP(10), count(4), XRP(25));
+            env(pay(alice, carol, XRP(11)), delegate::As(bob), Ter(terNO_DELEGATE_PERMISSION));
+            expectBudget(env, alice, bob, XRP(10), count(4), XRP(25));
+
+            // No ledger close between payments: each sees the preceding consumption.
+            env(pay(alice, carol, XRP(10)), delegate::As(bob));
+            expectBudget(env, alice, bob, XRP(10), count(3), XRP(15));
+            env(pay(alice, carol, XRP(10)), delegate::As(bob));
+            expectBudget(env, alice, bob, XRP(10), count(2), XRP(5));
+            env(pay(alice, carol, XRP(6)), delegate::As(bob), Ter(terNO_DELEGATE_PERMISSION));
+            expectBudget(env, alice, bob, XRP(10), count(2), XRP(5));
+            env(pay(alice, carol, XRP(5)), delegate::As(bob));
+            env.close();
+            expectBudget(env, alice, bob, XRP(10), count(1), XRP(0));
+            env(pay(alice, carol, XRP(1)), delegate::As(bob), Ter(terNO_DELEGATE_PERMISSION));
+
+            // Exhausting one delegate does not restrict the owner or another delegate.
+            env(pay(alice, carol, XRP(30)));
+            expectBudget(env, alice, bob, XRP(10), count(1), XRP(0));
+            expectBudget(env, alice, carol, XRP(10), std::nullopt, XRP(7));
+            env(pay(alice, bob, XRP(7)), delegate::As(carol));
+            expectBudget(env, alice, carol, XRP(10), std::nullopt, XRP(0));
+
+            // Owner replacement deliberately replenishes the allowance.
+            env(budgetSet(alice, bob, XRP(10), 1, XRP(20)));
+            env(pay(alice, carol, XRP(1)), delegate::As(bob));
+            expectBudget(env, alice, bob, XRP(10), 0, XRP(19));
+            env(pay(alice, carol, XRP(1)), delegate::As(bob), Ter(terNO_DELEGATE_PERMISSION));
+
+            env(budgetSet(alice, bob, XRP(10), 1, std::nullopt));
+            env(pay(alice, carol, XRP(10)), delegate::As(bob));
+            expectBudget(env, alice, bob, XRP(10), 0, std::nullopt);
+            env(pay(alice, carol, XRP(1)), delegate::As(bob), Ter(terNO_DELEGATE_PERMISSION));
+        }
+    }
+
+    void
+    testPaymentBudgetIOU(FeatureBitset features)
+    {
+        testcase("IOU budget charges actual source debit including transfer fees");
+        using namespace jtx;
+        Env env(*this, features);
+        Account const alice{"alice"}, bob{"bob"}, carol{"carol"}, gw{"gateway"};
+        auto const usd = gw["USD"];
+        env.fund(XRP(10000), alice, bob, carol, gw);
+        env.close();
+        env.trust(usd(1000), alice, carol);
+        env(pay(gw, alice, usd(100)));
+        env(rate(gw, 1.2));
+        env(budgetSet(alice, bob, usd(20), 3, usd(24)));
+
+        env(pay(alice, carol, usd(10)), delegate::As(bob), Ter(terNO_DELEGATE_PERMISSION));
+        env(pay(alice, carol, usd(10)),
+            Sendmax(XRP(20)),
+            delegate::As(bob),
+            Ter(terNO_DELEGATE_PERMISSION));
+        env(pay(alice, carol, usd(10)),
+            Sendmax(usd(20)),
+            Txflags(tfPartialPayment),
+            delegate::As(bob),
+            Ter(terNO_DELEGATE_PERMISSION));
+        expectBudget(env, alice, bob, usd(20), 3, usd(24));
+
+        // SendMax is 20, destination receives 10, source spends 12.
+        env(pay(alice, carol, usd(10)), Sendmax(usd(20)), delegate::As(bob));
+        env.require(Balance(alice, usd(88)), Balance(carol, usd(10)));
+        expectBudget(env, alice, bob, usd(20), 2, usd(12));
+        env(pay(alice, carol, usd(10)), Sendmax(usd(12)), delegate::As(bob));
+        env.require(Balance(alice, usd(76)), Balance(carol, usd(20)));
+        expectBudget(env, alice, bob, usd(20), 1, usd(0));
+        env(pay(alice, carol, usd(1)),
+            Sendmax(usd(2)),
+            delegate::As(bob),
+            Ter(terNO_DELEGATE_PERMISSION));
+
+        // Permission passes but execution lacks liquidity. The budget is unchanged.
+        env(budgetSet(alice, bob, usd(300), 3, usd(300)));
+        env(pay(alice, carol, usd(200)),
+            Sendmax(usd(250)),
+            delegate::As(bob),
+            Ter(tecPATH_PARTIAL));
+        expectBudget(env, alice, bob, usd(300), 3, usd(300));
+        env.require(Balance(alice, usd(76)), Balance(carol, usd(20)));
+    }
+
+    void
+    testPaymentBudgetAssets(FeatureBitset features)
+    {
+        testcase("Independent per-asset budgets and issuer matching");
+        using namespace jtx;
+        Env env(*this, features);
+        Account const alice{"alice"}, bob{"bob"}, carol{"carol"}, gw{"gateway"}, other{"other"};
+        auto const usd = gw["USD"];
+        auto const otherUSD = other["USD"];
+        env.fund(XRP(10000), alice, bob, carol, gw, other);
+        env.close();
+        env.trust(usd(1000), alice, carol);
+        env.trust(otherUSD(1000), alice, carol);
+        env(pay(gw, alice, usd(100)));
+        env(pay(other, alice, otherUSD(100)));
+        auto tx = budgetSet(alice, bob, usd(20), std::nullopt, usd(40));
+        auto xrp = budgetSet(alice, bob, XRP(10), std::nullopt, XRP(10));
+        tx[sfPermissions.jsonName][0u][sfPermission.jsonName][sfBounds.jsonName].append(
+            xrp[sfPermissions.jsonName][0u][sfPermission.jsonName][sfBounds.jsonName][0u]);
+        env(tx);
+        env(pay(alice, carol, otherUSD(10)),
+            Sendmax(otherUSD(10)),
+            delegate::As(bob),
+            Ter(terNO_DELEGATE_PERMISSION));
+        env(pay(alice, carol, usd(10)), Sendmax(usd(10)), delegate::As(bob));
+        env(pay(alice, carol, XRP(5)), delegate::As(bob));
+        expectBudget(env, alice, bob, usd(20), std::nullopt, usd(30));
+        expectBudget(env, alice, bob, XRP(10), std::nullopt, XRP(5), 1);
+    }
+
+    void
+    testPaymentBudgetMPT(FeatureBitset features)
+    {
+        using namespace jtx;
+        for (bool v2 : {false, true})
+        {
+            for (bool cleanup : {false, true})
+            {
+                testcase(
+                    std::string("MPT budget transfer fee: V2=") + (v2 ? "on" : "off") +
+                    ", cleanup=" + (cleanup ? "on" : "off"));
+                auto enabled = features;
+                if (!v2)
+                    enabled = enabled - featureMPTokensV2;
+                if (!cleanup)
+                    enabled = enabled - fixCleanup3_5_0;
+                Env env(*this, enabled);
+                Account const alice{"alice"}, bob{"bob"}, carol{"carol"}, gw{"gateway"};
+                env.fund(XRP(10000), alice, bob, carol, gw);
+                MPT const token = MPTTester(
+                    {.env = env, .issuer = gw, .holders = {alice, carol}, .transferFee = 20000});
+                env(pay(gw, alice, token(100)));
+                env(budgetSet(alice, bob, token(20), 3, token(24)));
+                env(pay(alice, carol, token(10)), Sendmax(token(20)), delegate::As(bob));
+                env.require(Balance(alice, token(88)), Balance(carol, token(10)));
+                expectBudget(env, alice, bob, token(20), 2, token(12));
+                env(pay(alice, carol, token(10)), Sendmax(token(12)), delegate::As(bob));
+                env.require(Balance(alice, token(76)), Balance(carol, token(20)));
+                expectBudget(env, alice, bob, token(20), 1, token(0));
+                env(pay(alice, carol, token(1)),
+                    Sendmax(token(2)),
+                    delegate::As(bob),
+                    Ter(terNO_DELEGATE_PERMISSION));
+            }
         }
     }
 
@@ -3299,6 +3566,11 @@ class Delegate_test : public beast::unit_test::Suite
         testPermissionToTxType();
         testBoundedPaymentGranular(all);
         testBoundOptionalFields(all);
+        testPaymentBudgetValidation(all);
+        testPaymentBudgetXRP(all);
+        testPaymentBudgetIOU(all);
+        testPaymentBudgetAssets(all);
+        testPaymentBudgetMPT(all);
     }
 };
 BEAST_DEFINE_TESTSUITE(Delegate, app, xrpl);

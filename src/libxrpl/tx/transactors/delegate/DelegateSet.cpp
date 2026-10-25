@@ -62,12 +62,29 @@ DelegateSet::preflight(PreflightContext const& ctx)
             if (bound.getFName() != sfBound)
                 return temMALFORMED;
 
-            if (!bound.isFieldPresent(sfMaxAmount) || bound[sfMaxAmount] <= beast::kZero)
+            bool const hasAmount = bound.isFieldPresent(sfMaxAmount);
+            bool const hasPayments = bound.isFieldPresent(sfMaxPayments);
+            bool const hasBudget = bound.isFieldPresent(sfMaxBudget);
+
+            if (!hasAmount || (!hasPayments && !hasBudget))
                 return temMALFORMED;
 
-            if (bound.isFieldPresent(sfMaxPayments) && bound[sfMaxPayments] == 0)
-            {
+            auto const& maxAmount = bound.getFieldAmount(sfMaxAmount);
+            if (maxAmount <= beast::kZero)
                 return temMALFORMED;
+
+            if (hasPayments && bound[sfMaxPayments] == 0)
+                return temMALFORMED;
+
+            if (hasBudget)
+            {
+                auto const& maxBudget = bound.getFieldAmount(sfMaxBudget);
+
+                if (maxBudget <= beast::kZero)
+                    return temMALFORMED;
+
+                if (maxBudget.asset() != maxAmount.asset())
+                    return temMALFORMED;
             }
         }
     }

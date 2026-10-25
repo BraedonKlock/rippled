@@ -290,6 +290,8 @@ TYPED_SFIELD(sfFeeAmountDelta,           AMOUNT,    34)
 
 // Added by Yousef
 TYPED_SFIELD(sfMaxAmount,                AMOUNT,    35)
+// Added by Filip
+TYPED_SFIELD(sfMaxBudget, 		 AMOUNT,    36)
 
 
 // variable length (common)
