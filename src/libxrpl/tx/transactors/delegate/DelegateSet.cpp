@@ -6,7 +6,6 @@
 #include <xrpl/ledger/helpers/AccountRootHelpers.h>
 #include <xrpl/ledger/helpers/DirectoryHelpers.h>
 #include <xrpl/ledger/helpers/SponsorHelpers.h>
-#include <xrpl/protocol/Feature.h>
 #include <xrpl/protocol/Indexes.h>
 #include <xrpl/protocol/Protocol.h>
 #include <xrpl/protocol/SField.h>
@@ -42,51 +41,6 @@ DelegateSet::preflight(PreflightContext const& ctx)
 
         if (!Permission::getInstance().isDelegable(permission[sfPermissionValue], ctx.rules))
             return temMALFORMED;
-
-        // check if permission is of type sfBounds and continue for loop to skip checks
-        if (!permission.isFieldPresent(sfBounds))
-            continue;
-
-        if (!ctx.rules.enabled(featureBoundedDelegation))
-            return temDISABLED;
-
-        if (permission[sfPermissionValue] != Permission::txToPermissionType(ttPAYMENT))
-            return temMALFORMED;
-
-        auto const& bounds = permission.getFieldArray(sfBounds);
-
-        // loop through the bounds and ensure that they are greater than 0 in amount of transactions
-        // and payment amount
-        for (auto const& bound : bounds)
-        {
-            if (bound.getFName() != sfBound)
-                return temMALFORMED;
-
-            bool const hasAmount = bound.isFieldPresent(sfMaxAmount);
-            bool const hasPayments = bound.isFieldPresent(sfMaxPayments);
-            bool const hasBudget = bound.isFieldPresent(sfMaxBudget);
-
-            if (!hasAmount || (!hasPayments && !hasBudget))
-                return temMALFORMED;
-
-            auto const& maxAmount = bound.getFieldAmount(sfMaxAmount);
-            if (maxAmount <= beast::kZero)
-                return temMALFORMED;
-
-            if (hasPayments && bound[sfMaxPayments] == 0)
-                return temMALFORMED;
-
-            if (hasBudget)
-            {
-                auto const& maxBudget = bound.getFieldAmount(sfMaxBudget);
-
-                if (maxBudget <= beast::kZero)
-                    return temMALFORMED;
-
-                if (maxBudget.asset() != maxAmount.asset())
-                    return temMALFORMED;
-            }
-        }
     }
 
     return tesSUCCESS;

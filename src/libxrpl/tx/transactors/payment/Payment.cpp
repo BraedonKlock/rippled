@@ -1,7 +1,6 @@
 #include <xrpl/tx/transactors/payment/Payment.h>
 
 #include <xrpl/basics/Log.h>
-#include <xrpl/basics/Number.h>
 #include <xrpl/beast/utility/Zero.h>
 #include <xrpl/beast/utility/instrumentation.h>
 #include <xrpl/core/ServiceRegistry.h>
@@ -520,89 +519,6 @@ Payment::preclaim(PreclaimContext const& ctx)
 }
 
 TER
-Payment::consumePaymentBounds(STAmount const& actualSpend)
-{
-    auto const delegate = ctx_.tx[~sfDelegate];
-
-    if (!delegate)
-        return tesSUCCESS;
-
-    auto sle = view().peek(keylet::delegate(ctx_.tx[sfAccount], *delegate));
-
-    if (!sle)
-        return tefINTERNAL;
-
-    auto permissions = sle->getFieldArray(sfPermissions);
-    auto const txPermission = ctx_.tx.getTxnType() + 1;
-
-    auto const& amount = actualSpend;
-
-    if (amount <= beast::kZero)
-        return tefINTERNAL;
-
-    for (auto& permission : permissions)
-    {
-        if (permission[sfPermissionValue] != txPermission)
-            continue;
-
-        if (!permission.isFieldPresent(sfBounds))
-            return tesSUCCESS;
-
-        auto bounds = permission.getFieldArray(sfBounds);
-
-        for (auto& bound : bounds)
-        {
-            auto const& maxAmount = bound.getFieldAmount(sfMaxAmount);
-
-            if (amount.asset() != maxAmount.asset())
-                continue;
-
-            auto const remaining = bound[~sfMaxPayments];
-            auto const budget = bound[~sfMaxBudget];
-
-            if (amount > maxAmount)
-                return tecNO_PERMISSION;
-
-            if (remaining && *remaining == 0)
-                return tecNO_PERMISSION;
-
-            if (budget)
-            {
-                if (budget->asset() != amount.asset())
-                    return tefINTERNAL;
-
-                if (amount > *budget)
-                    return tecNO_PERMISSION;
-
-                // Round the remaining budget down for issued currencies.
-                NumberRoundModeGuard const rounding{Number::RoundingMode::Downward};
-
-                auto const updatedBudget = *budget - amount;
-
-                if (updatedBudget < beast::kZero || updatedBudget >= *budget)
-                    return tecNO_PERMISSION;
-
-                bound.setFieldAmount(sfMaxBudget, updatedBudget);
-            }
-
-            if (remaining)
-                bound.setFieldU32(sfMaxPayments, *remaining - 1);
-
-            permission.setFieldArray(sfBounds, bounds);
-            sle->setFieldArray(sfPermissions, permissions);
-
-            view().update(sle);
-
-            return tesSUCCESS;
-        }
-
-        return tefINTERNAL;
-    }
-
-    return tesSUCCESS;
-}
-
-TER
 Payment::doApply()
 {
     // If a DomainID is present, verify both sender and destination are still in
@@ -758,15 +674,6 @@ Payment::doApply()
         // careful with their path spec next time.
         if (isTerRetry(terResult))
             terResult = tecPATH_DRY;
-
-        if (isTesSuccess(terResult) && view().rules().enabled(featureBoundedDelegation))
-        {
-            if (auto const result = consumePaymentBounds(rc.actualAmountIn); !isTesSuccess(result))
-            {
-                return result;
-            }
-        }
-
         return terResult;
     }
     if (isDstMPT)
@@ -877,29 +784,6 @@ Payment::doApply()
             res = tecPATH_PARTIAL;
         }
 
-        if (isTesSuccess(res) && view().rules().enabled(featureBoundedDelegation))
-        {
-            STAmount actualSpend = amountDeliver;
-
-            // Holder-to-holder transfers can charge a transfer fee.
-            if (accountID_ != issuer && dstAccountID != issuer)
-            {
-                if (view().rules().enabled(fixCleanup3_5_0))
-                {
-                    actualSpend = addTransferFee(amountDeliver, rate);
-                }
-                else
-                {
-                    actualSpend = multiply(amountDeliver, rate);
-                }
-            }
-
-            if (auto const result = consumePaymentBounds(actualSpend); !isTesSuccess(result))
-            {
-                return result;
-            }
-        }
-
         return res;
     }
 
@@ -983,11 +867,6 @@ Payment::doApply()
     if (sleDst->isFlag(lsfPasswordSpent))
         sleDst->clearFlag(lsfPasswordSpent);
 
-    if (view().rules().enabled(featureBoundedDelegation))
-    {
-        if (auto const result = consumePaymentBounds(dstAmount); !isTesSuccess(result))
-            return result;
-    }
     return tesSUCCESS;
 }
 
@@ -1002,60 +881,6 @@ Payment::finalizeInvariants(STTx const&, TER, XRPAmount, ReadView const&, beast:
 {
     // No transaction-specific invariants yet (future work).
     return true;
-}
-
-NotTEC
-Payment::checkBounds(STTx const& tx, STObject const& permission)
-{
-    if (!permission.isFieldPresent(sfBounds))
-        return tesSUCCESS;
-
-    if (tx.isFieldPresent(sfPaths) || tx.isFlag(tfPartialPayment))
-    {
-        return terNO_DELEGATE_PERMISSION;
-    }
-
-    auto const& bounds = permission.getFieldArray(sfBounds);
-
-    auto const& amount = tx.getFieldAmount(sfAmount);
-
-    if (!amount.native() && amount.holds<Issue>() && !tx.isFieldPresent(sfSendMax))
-    {
-        return terNO_DELEGATE_PERMISSION;
-    }
-
-    if (tx.isFieldPresent(sfSendMax))
-    {
-        auto const& sendMax = tx.getFieldAmount(sfSendMax);
-
-        if (sendMax.asset() != amount.asset())
-            return terNO_DELEGATE_PERMISSION;
-    }
-
-    auto const& spendingAmount =
-        tx.isFieldPresent(sfSendMax) ? tx.getFieldAmount(sfSendMax) : amount;
-
-    for (auto const& bound : bounds)
-    {
-        auto const& maxAmount = bound.getFieldAmount(sfMaxAmount);
-
-        if (spendingAmount.asset() != maxAmount.asset())
-            continue;
-
-        if (spendingAmount > maxAmount)
-            return terNO_DELEGATE_PERMISSION;
-
-        if (auto const maxPayments = bound[~sfMaxPayments]; maxPayments && *maxPayments == 0)
-            return terNO_DELEGATE_PERMISSION;
-
-        if (bound.isFieldPresent(sfMaxBudget) && spendingAmount > bound.getFieldAmount(sfMaxBudget))
-        {
-            return terNO_DELEGATE_PERMISSION;
-        }
-        return tesSUCCESS;
-    }
-
-    return terNO_DELEGATE_PERMISSION;
 }
 
 }  // namespace xrpl

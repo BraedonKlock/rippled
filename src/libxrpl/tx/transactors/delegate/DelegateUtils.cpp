@@ -1,5 +1,4 @@
 #include <xrpl/ledger/helpers/DelegateHelpers.h>
-#include <xrpl/protocol/Feature.h>
 #include <xrpl/protocol/Permissions.h>
 #include <xrpl/protocol/SField.h>
 #include <xrpl/protocol/STArray.h>
@@ -7,13 +6,12 @@
 #include <xrpl/protocol/STTx.h>
 #include <xrpl/protocol/TER.h>
 #include <xrpl/protocol/TxFormats.h>
-#include <xrpl/tx/transactors/payment/Payment.h>
 
 #include <unordered_set>
 
 namespace xrpl {
 NotTEC
-checkTxPermission(SLE::ConstRef delegate, STTx const& tx, Rules const& rules)
+checkTxPermission(SLE::ConstRef delegate, STTx const& tx)
 {
     if (!delegate)
         return terNO_DELEGATE_PERMISSION;
@@ -24,39 +22,11 @@ checkTxPermission(SLE::ConstRef delegate, STTx const& tx, Rules const& rules)
     for (auto const& permission : permissionArray)
     {
         auto const permissionValue = permission[sfPermissionValue];
-        if (permissionValue != txPermission)
-            continue;
-        
-        if (!permission.isFieldPresent(sfBounds))
+        if (permissionValue == txPermission)
             return tesSUCCESS;
-        
-        if (!rules.enabled(featureBoundedDelegation))
-            return terNO_DELEGATE_PERMISSION;
-
-        switch(tx.getTxnType())
-        {
-            case ttPAYMENT: 
-                return Payment::checkBounds(tx, permission); 
-            default:
-                return terNO_DELEGATE_PERMISSION;
-        };
-
-        return tesSUCCESS;
     }
 
     return terNO_DELEGATE_PERMISSION;
-}
-
-bool
-hasBoundedTxPermission(SLE::ConstRef delegate, STTx const& tx, Rules const& rules)
-{
-    if (!delegate || !rules.enabled(featureBoundedDelegation))
-        return false;
-    auto const txPermission = tx.getTxnType() + 1;
-    for (auto const& permission : delegate->getFieldArray(sfPermissions))
-        if (permission[sfPermissionValue] == txPermission)
-            return permission.isFieldPresent(sfBounds);
-    return false;
 }
 
 std::unordered_set<GranularPermissionType>

@@ -87,22 +87,7 @@ InnerObjectFormats::InnerObjectFormats()
             {sfCredentialType, SoeRequired},
         });
 
-    add(sfPermission.jsonName, 
-        sfPermission.getCode(), 
-        {
-            {sfPermissionValue, SoeRequired},
-            {sfBounds, SoeOptional}
-        });    
-
-    //Add the sfBound object definition
-    add(sfBound.jsonName,
-        sfBound.getCode(),
-        {
-            {sfMaxAmount, SoeRequired},
-            {sfMaxPayments, SoeOptional},
-	    {sfMaxBudget, SoeOptional}
-        }
-    );
+    add(sfPermission.jsonName, sfPermission.getCode(), {{sfPermissionValue, SoeRequired}});
 
     add(sfBatchSigner.jsonName,
         sfBatchSigner.getCode(),

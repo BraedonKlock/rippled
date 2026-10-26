@@ -392,11 +392,8 @@ Transactor::checkPermission(
     if (!sle)
         return terNO_DELEGATE_PERMISSION;
 
-    if (isTesSuccess(checkTxPermission(sle, tx, view.rules())))
+    if (isTesSuccess(checkTxPermission(sle, tx)))
         return tesSUCCESS;
-
-    if (hasBoundedTxPermission(sle, tx, view.rules()))
-        return terNO_DELEGATE_PERMISSION;
 
     if (!Permission::getInstance().hasGranularPermissions(tx.getTxnType()))
         return terNO_DELEGATE_PERMISSION;

@@ -52,12 +52,6 @@ public:
     static TER
     preclaim(PreclaimContext const& ctx);
 
-    static NotTEC
-    checkBounds(STTx const& tx, STObject const& permission);
-
-    TER
-    consumePaymentBounds(STAmount const& actualSpend);
-
     TER
     doApply() override;
 
