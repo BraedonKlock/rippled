@@ -309,6 +309,15 @@ LEDGER_ENTRY(ltESCROW, 0x0075, Escrow, escrow, ({
     {sfIssuerNode,           SoeOptional},
 }))
 
+
+
+
+LEDGER_ENTRY(ltASSETBOUND, 0x0077, AssetBound, asset_bound, ({
+    {sfOwner, SoeRequired},
+    {sfDelegate, SoeOptional},
+}))
+
+
 /** A ledger object describing a single unidirectional XRP payment channel.
 
     \sa keylet::payChannel

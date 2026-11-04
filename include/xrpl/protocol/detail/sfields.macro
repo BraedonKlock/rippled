@@ -92,7 +92,8 @@ TYPED_SFIELD(sfTicketSequence,           UINT32,    41)
 TYPED_SFIELD(sfNFTokenTaxon,             UINT32,    42)
 TYPED_SFIELD(sfMintedNFTokens,           UINT32,    43)
 TYPED_SFIELD(sfBurnedNFTokens,           UINT32,    44)
-// 45 to 47 reserved
+TYPED_SFIELD(sfTransactionCount,         UINT32,    45)
+// 46 & 47 reserved
 TYPED_SFIELD(sfVoteWeight,               UINT32,    48)
 TYPED_SFIELD(sfFirstNFTokenSequence,     UINT32,    50)
 TYPED_SFIELD(sfOracleDocumentID,         UINT32,    51)
