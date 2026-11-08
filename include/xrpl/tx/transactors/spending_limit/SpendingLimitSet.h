@@ -1,17 +1,17 @@
 #if TRANSACTION_INCLUDE
-#   include <xrpl/tx/transactors/asset_bound/AssetBoundSet.h>
+#include <xrpl/tx/transactors/spending_limit/SpendingLimitSet.h>
 #endif
 
 #include <xrpl/tx/Transactor.h>
 
 namespace xrpl {
 
-class AssetBoundSet : public Transactor
+class SpendingLimitSet : public Transactor
 {
 public:
     static constexpr ConsequencesFactoryType ConsequencesFactory{Normal};
 
-    explicit AssetBoundSet(ApplyContext& ctx)
+    explicit SpendingLimitSet(ApplyContext& ctx)
         : Transactor(ctx)
     {
     }
