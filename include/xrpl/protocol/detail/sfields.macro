@@ -38,6 +38,7 @@ TYPED_SFIELD(sfSignerWeight,             UINT16,     3)
 TYPED_SFIELD(sfTransferFee,              UINT16,     4)
 TYPED_SFIELD(sfTradingFee,               UINT16,     5)
 TYPED_SFIELD(sfDiscountedFee,            UINT16,     6)
+TYPED_SFIELD(sfLimitedTransactionType,   UINT16,     7)
 
 // 16-bit integers (uncommon)
 TYPED_SFIELD(sfVersion,                  UINT16,    16)
@@ -93,7 +94,8 @@ TYPED_SFIELD(sfNFTokenTaxon,             UINT32,    42)
 TYPED_SFIELD(sfMintedNFTokens,           UINT32,    43)
 TYPED_SFIELD(sfBurnedNFTokens,           UINT32,    44)
 TYPED_SFIELD(sfTransactionCount,         UINT32,    45)
-// 46 & 47 reserved
+TYPED_SFIELD(sfMaxTransactions,          UINT32,    46)
+// 47 reserved
 TYPED_SFIELD(sfVoteWeight,               UINT32,    48)
 TYPED_SFIELD(sfFirstNFTokenSequence,     UINT32,    50)
 TYPED_SFIELD(sfOracleDocumentID,         UINT32,    51)

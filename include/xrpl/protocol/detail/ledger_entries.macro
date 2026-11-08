@@ -315,6 +315,13 @@ LEDGER_ENTRY(ltESCROW, 0x0075, Escrow, escrow, ({
 LEDGER_ENTRY(ltSPENDINGLIMIT, 0x0077, SpendingLimit, spending_limit, ({
     {sfOwner, SoeRequired},
     {sfDelegate, SoeOptional},
+    {sfLimitedTransactionType, soeRequired},
+    {sfAsset, soeRequired},
+    {sfLimitAmount, soeOptional},
+    {sfMaxTransactions, soeOptional},
+    {sfTransactionCount, soeRequired},
+    {sfPreviousTxnID, soeRequired},
+    {sfPreviousTxnLgrSeq, soeRequired},
 }))
 
 
